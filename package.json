@@ -1,0 +1,19 @@
+{
+  "name": "diffboard",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/teceer/diffboard.git" },
+  "description": "Live whiteboard of a branch's changes: changed files as nodes linked by imports, with diffs and full files. Reads git, so it follows any editor or agent.",
+  "type": "module",
+  "bin": {
+    "diffboard": "bin/diffboard"
+  },
+  "scripts": {
+    "start": "bun src/cli.ts serve",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@vtsls/language-server": "^0.3.0"
+  }
+}

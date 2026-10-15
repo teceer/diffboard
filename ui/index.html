@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>diffboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <button class="ib" id="boardsToggle" title="Boards (b)" aria-label="Toggle boards"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg></button>
+  <button class="ib" id="navBack" title="Back (Ctrl+- or Alt+←)" aria-label="Back"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3 5 8l5 5"/></svg></button>
+  <button class="ib" id="navFwd" title="Forward (Ctrl+Shift+- or Alt+→)" aria-label="Forward"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 3 5 5-5 5"/></svg></button>
+  <div class="crumbs"><b id="boardName" class="bname">default</b><span class="sep">/</span></div>
+  <div id="repos" class="repos"></div>
+  <div class="spacer"></div>
+  <div class="seg" id="graphMode" role="radiogroup" aria-label="Graph"><button data-graph="changes" title="Changed files and their import neighbours">Changes</button><button data-graph="map" title="The whole repository as folders that unfold on click">Whole repo</button></div>
+  <div class="seg" id="mode" role="radiogroup" aria-label="Diff mode">
+    <button data-mode="branch" title="Everything since the branch left its base, plus uncommitted work">Whole branch</button>
+    <button data-mode="head" title="Only what is not committed yet">Since last commit</button>
+  </div>
+  <input id="filter" type="search" placeholder="Filter files…" aria-label="Filter files">
+  <label class="chk"><input type="checkbox" id="showNeighbours" checked> neighbours</label>
+  <div class="seg" role="group" aria-label="Inline diffs"><button id="expandAll" title="Show the diff inside every changed file node">Expand all</button><button id="collapseAll" title="Back to compact nodes">Collapse all</button></div>
+  <div class="seg" id="cardLayout" role="radiogroup" aria-label="Diff layout in nodes"><button data-card-layout="unified" title="Inline diffs in one column">Unified</button><button data-card-layout="split" title="Inline diffs side by side">Split</button></div>
+  <div class="seg" id="paneMode" role="radiogroup" aria-label="Panels"><button data-pane="graph" title="Graph only">Graph</button><button data-pane="both" title="Graph and detail panel">Both</button><button data-pane="panel" title="Detail panel only (hides the graph)">Panel</button></div>
+  <button id="reviewToggle" class="btn" title="Suggested review order (r)">Review <span id="reviewProgress" class="meta"></span></button>
+  <button id="newNote" class="btn">New note</button>
+</header>
+<main class="layout">
+  <nav class="dock" id="boards" aria-label="Boards">
+    <div class="docktabs" role="tablist">
+      <button role="tab" data-dock="boards">Boards</button><button role="tab" data-dock="files">Files</button>
+      <span class="spacer"></span>
+      <button class="ib" id="newBoard" title="New board" aria-label="New board"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg></button>
+      <button class="ib" id="collapseTree" title="Collapse all folders" aria-label="Collapse all folders" hidden><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6l4-3 4 3M4 10l4 3 4-3"/></svg></button>
+    </div>
+    <div class="dockpane" data-pane="boards">
+      <ol id="boardList" class="boardlist"></ol>
+      <div class="dockfoot meta">Agents: <code>diffboard board new &lt;name&gt; &lt;repo&gt;</code></div>
+    </div>
+    <div class="dockpane" data-pane="files" hidden>
+      <input id="treeFilter" type="search" placeholder="Filter files… (⌘P to jump)" aria-label="Filter files">
+      <ul id="fileTree" class="tree" role="tree"></ul>
+    </div>
+  </nav>
+  <aside class="review" id="review" hidden aria-label="Review order">
+    <div class="rvhead">
+      <b>Review</b><span id="rvCount" class="meta"></span><span class="spacer"></span>
+      <button class="panelClose static" id="reviewClose" title="Close (r)" aria-label="Close review">✕</button>
+    </div>
+    <div class="rvbar"><i id="rvBar"></i></div>
+    <label class="rvtour">Order <select id="rvTour"></select></label>
+    <ol id="rvList" class="rvlist"></ol>
+    <div class="rvkeys meta"><kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>x</kbd> reviewed &amp; next · <kbd>r</kbd> hide</div>
+  </aside>
+  <section class="canvasWrap">
+    <div id="cy" aria-label="Changed files graph"></div>
+    <div id="cards" class="cards" aria-label="Inline diffs"></div>
+    <div class="legend">
+      <span><i class="sw a"></i>added</span><span><i class="sw m"></i>modified</span><span><i class="sw d"></i>deleted</span><span><i class="sw r"></i>renamed</span><span><i class="sw n"></i>neighbour</span><span><i class="sw note"></i>note</span><span class="dep"><span class="dep-out-sw">→</span> depends on</span><span class="dep"><span class="dep-in-sw">←</span> used by</span>
+      <button id="relayout" class="btn ghost" title="Lay the graph out again">Re-layout</button>
+    </div>
+    <aside id="activity" class="activity">
+      <button class="actHead" id="actToggle" aria-expanded="true">Activity</button>
+      <ol id="actList"></ol>
+    </aside>
+    <div id="empty" class="empty" hidden></div>
+  </section>
+  <div class="resizer" id="resizer" title="Drag to resize"></div>
+  <section class="panel" id="panel">
+    <button class="panelClose" id="panelClose" title="Close panel (\)" aria-label="Close panel">✕</button>
+    <div class="placeholder" id="placeholder">
+      <p><b>Click a file</b> to see its diff, or a note to read it.</p>
+      <p>Select lines by clicking line numbers (shift-click extends) and copy a reference to paste into a chat with an agent.</p>
+    </div>
+    <div id="fileView" hidden></div>
+    <div id="noteView" hidden></div>
+    <div id="refs" class="refs" hidden aria-label="References"></div>
+  </section>
+</main>
+<footer class="statusbar">
+  <span class="sbitem"><span class="dot" id="live" title="Live connection"></span><span id="sbBoard"></span></span>
+  <span class="sbitem meta" id="sbStats"></span>
+  <span class="spacer"></span>
+  <span class="sbitem meta" id="sbLsp"></span>
+  <span class="sbitem meta" id="sbMode"></span>
+  <span class="sbitem meta keys"><kbd>b</kbd> boards <kbd>p</kbd> files <kbd>r</kbd> review <kbd>\</kbd> panel <kbd>e</kbd> edit</span>
+</footer>
+<div id="selbar" class="selbar" hidden></div>
+<div id="lspTip" class="lsptip" hidden></div>
+<div id="ctxMenu" class="ctxmenu" role="menu" hidden></div>
+<div id="quickOpen" class="qo" hidden><div class="qobox" role="dialog" aria-label="Open file"><input id="qoInput" type="text" placeholder="Search files by name…" autocomplete="off" spellcheck="false"><ul id="qoList" role="listbox"></ul></div></div>
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

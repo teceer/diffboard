@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#dcdcdd" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#3b414d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>diffboard · design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="design.css">
+</head>
+<body>
+<header class="top">
+  <button class="ib mob" id="dockBtn" aria-label="Designs and layers">☰</button>
+  <a class="mark desk" href="./" title="Back to the diff board">◧ diffboard</a>
+  <span class="sep desk">/</span>
+  <button class="bname" id="dname" title="Rename">—</button>
+  <span class="chip" id="vchip"></span>
+  <div class="seg desk" role="tablist" aria-label="View"><a href="./" id="toDiff">Changes</a><span class="on">Design</span></div>
+  <span class="spacer"></span>
+  <div class="pres desk" id="pres"></div>
+  <button class="btn decide mob" id="decideBtn" aria-label="To decide" hidden></button>
+  <div class="menuwrap mob"><button class="ib" id="moreBtn" aria-label="More">⋯</button>
+    <div class="menu" id="moreMenu" hidden>
+      <button data-m="undo">↶ Undo</button><button data-m="share">⇪ Share</button><button data-m="approve">✓ Approve version</button>
+      <button data-fmt="md">Copy as Markdown</button><button data-fmt="dbml">Copy as DBML</button><button data-fmt="mermaid">Copy as mermaid</button><a href="./" class="mi">◧ Diff board</a>
+    </div></div>
+  <button class="desk btn" id="undo" title="Undo (⌘Z)" disabled>↶ Undo</button>
+  <div class="desk menuwrap">
+    <button class="btn out" id="exportBtn">Export ▾</button>
+    <div class="menu" id="exportMenu" hidden>
+      <button data-fmt="md">Copy as Markdown (agent context)</button>
+      <button data-fmt="dbml">Copy as DBML</button>
+      <button data-fmt="mermaid">Copy as mermaid erDiagram</button>
+      <button data-fmt="json">Copy as JSON</button>
+    </div>
+  </div>
+  <button class="desk btn soft" id="shareBtn">⇪ Share</button>
+  <button class="desk btn pri" id="approveBtn" title="Freeze the current model as the next version">✓ Approve</button>
+</header>
+<main class="main">
+  <div class="scrim" id="scrim" hidden></div>
+  <nav class="dock" id="dock">
+    <h4>Designs</h4>
+    <ol id="designList" class="list"></ol>
+    <h4>Layers</h4>
+    <div id="layers" class="list"></div>
+    <h4>To decide <span class="chip c-open" id="decideCount"></span></h4>
+    <ol id="decide" class="list"></ol>
+    <h4>People</h4>
+    <ol id="people" class="list"></ol>
+    <span class="grow"></span>
+    <div class="dockfoot" id="fileFoot"></div>
+  </nav>
+  <section class="canvas" id="cv" tabindex="0">
+    <div class="world" id="world"></div>
+    <div class="tool" id="tool">
+      <button data-tool="select" class="on" title="Select and move (V)">↖</button>
+      <button data-tool="table" title="Add table (T)">⊞</button>
+      <button data-tool="step" title="Add process step (S)">▭</button>
+      <button data-tool="assumption" title="Add assumption (A)">✎</button>
+      <span class="tsep"></span>
+      <button id="fitBtn" title="Fit (⌘0)">⤢</button>
+    </div>
+    <div class="previewbar" id="previewBar" hidden></div>
+    <div class="mini" id="mini"><div class="vp" id="miniVp"></div></div>
+    <div class="zoom" id="zoom">100%</div>
+    <div class="empty" id="empty" hidden></div>
+  </section>
+  <aside class="insp" id="insp"></aside>
+</main>
+<footer class="status" id="status"></footer>
+<div class="toasts" id="toasts"></div>
+<div class="overlay" id="overlay" hidden></div>
+<script src="design.js"></script>
+</body>
+</html>

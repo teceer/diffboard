@@ -8,7 +8,8 @@ import { ImportGraph, packageTarget, type PackageTarget } from './imports';
 import { NoteStore, type Note, type NoteLink } from './notes';
 import { ReviewStore, autoOrder, type TourStep } from './review';
 
-export const HOME = join(homedir(), '.diffboard');
+/** DIFFBOARD_HOME moves all state (a second server for tests, or a sandbox). */
+export const HOME = process.env.DIFFBOARD_HOME || join(homedir(), '.diffboard');
 export const CONFIG_FILE = join(HOME, 'config.json');
 
 export interface RepoConfig { path: string; base?: string }
@@ -48,8 +49,9 @@ interface RepoState {
 }
 
 export async function loadConfig(): Promise<Config> {
-  try { return { port: 4700, ...JSON.parse(await readFile(CONFIG_FILE, 'utf8')) }; }
-  catch { return { port: 4700 }; }
+  const env = Number(process.env.DIFFBOARD_PORT) || undefined;
+  try { return { port: 4700, ...JSON.parse(await readFile(CONFIG_FILE, 'utf8')), ...(env ? { port: env } : {}) }; }
+  catch { return { port: env ?? 4700 }; }
 }
 export async function saveConfig(c: Config) {
   await mkdir(HOME, { recursive: true });

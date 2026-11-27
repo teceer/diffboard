@@ -5,6 +5,8 @@ import { HOME, loadConfig, saveConfig } from './board';
 import { Boards } from './boards';
 import { isRepo, repoRoot } from './git';
 import { serve } from './server';
+import { DesignStore } from './design/store';
+import { cmdDesign, DESIGN_HELP } from './design/cli';
 
 const PID_FILE = join(HOME, 'server.pid');
 const LOG_FILE = join(HOME, 'server.log');
@@ -44,10 +46,12 @@ Review tours (ordered files with what to look at; files outside the tour follow 
 
 The board diffs each repo against the merge-base with its base branch (auto: the closest of
 origin/release-candidate/*, develop, main, master) and includes uncommitted and untracked files.
-Per-branch override: git config branch.<name>.diffboardBase <ref>`;
+Per-branch override: git config branch.<name>.diffboardBase <ref>
+
+${DESIGN_HELP}`;
 
 function parseArgs(argv: string[]) {
-  const out: { _: string[]; board?: string; base?: string; port?: number; title?: string; body?: string; bodyFile?: string; author?: string; link: string[]; unlink: string[]; step: string[]; stepsFile?: string } = { _: [], link: [], unlink: [], step: [] };
+  const out: { _: string[]; board?: string; base?: string; port?: number; title?: string; body?: string; bodyFile?: string; author?: string; link: string[]; unlink: string[]; step: string[]; stepsFile?: string; flags: Record<string, string>; col: string[] } = { _: [], link: [], unlink: [], step: [], flags: {}, col: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--base') out.base = argv[++i];
@@ -61,6 +65,9 @@ function parseArgs(argv: string[]) {
     else if (a === '--unlink') out.unlink.push(argv[++i]);
     else if (a === '--step') out.step.push(argv[++i]);
     else if (a === '--steps-file') out.stepsFile = argv[++i];
+    else if (a === '--col') out.col.push(argv[++i]);
+    else if (/^--(design|dir|purpose|format|file|rationale|reason|target|as|timeout|module|note|kind|lane|trigger|status)$/.test(a)) out.flags[a.slice(2)] = argv[++i];
+    else if (/^--(not-null|null|pk|unique|no-fk|json)$/.test(a)) out.flags[a.slice(2)] = 'true';
     else out._.push(a);
   }
   return out;
@@ -182,7 +189,10 @@ async function cmdServe(args: ReturnType<typeof parseArgs>) {
   await mkdir(HOME, { recursive: true });
   const boards = new Boards();
   await boards.load();
-  await saveConfig({ port: cfg.port });
+  const designs = new DesignStore(join(HOME, 'designs.json'));
+  await designs.load();
+  designs.onProposal(notifyProposal);
+  if (!process.env.DIFFBOARD_PORT) await saveConfig({ port: cfg.port });
   const named = args.board ?? process.env.DIFFBOARD_BOARD;
   const board = named ? boards.get(named) ?? await boards.create(named) : boards.fallback;
   for (const p of args._) {
@@ -190,9 +200,19 @@ async function cmdServe(args: ReturnType<typeof parseArgs>) {
     if (!(await isRepo(abs))) { console.error(`skip ${abs}: not a git repository`); continue; }
     await board.addRepo({ path: await repoRoot(abs), base: args.base });
   }
-  serve(boards, cfg.port);
+  serve(boards, cfg.port, designs);
   await writeFile(PID_FILE, String(process.pid));
   console.log(`diffboard on http://localhost:${cfg.port} (${boards.meta.length} board${boards.meta.length === 1 ? '' : 's'})`);
+}
+
+/**
+ * A proposal waits for the user's decision: push it to the Harness app when harness is installed.
+ * The link is relative: harness serve proxies /diffboard/ to this server on its tailnet address.
+ */
+function notifyProposal(d: { id: string; name: string }, p: { id: string; title: string; author: string }) {
+  if (process.env.DIFFBOARD_NOTIFY === '0' || !Bun.which('harness')) return;
+  const link = `/diffboard/design#d=${encodeURIComponent(d.id)}&p=${encodeURIComponent(p.id)}`;
+  Bun.spawn(['harness', 'notify', '-t', `Design: ${d.name}`, '-u', link, `${p.author.replace(/^agent:/, '')} proposes ${p.id}: ${p.title}`], { stdout: 'ignore', stderr: 'ignore', env: { ...process.env, HARNESS_PANE: '' } });
 }
 
 async function cmdStart(args: ReturnType<typeof parseArgs>) {
@@ -204,7 +224,7 @@ async function cmdStart(args: ReturnType<typeof parseArgs>) {
   }
   await mkdir(HOME, { recursive: true });
   const fd = openSync(LOG_FILE, 'a');
-  const child = Bun.spawn(['bun', join(import.meta.dir, 'cli.ts'), 'serve', ...process.argv.slice(3)], { stdio: ['ignore', fd, fd], env: process.env });
+  const child = Bun.spawn(['bun', join(import.meta.dir, 'cli.ts'), 'serve', ...(['start', 'add'].includes(process.argv[2]) ? process.argv.slice(3) : [])], { stdio: ['ignore', fd, fd], env: process.env });
   child.unref();
   for (let i = 0; i < 60 && !(await running()); i++) await Bun.sleep(250);
   if (!(await running())) { console.error(`failed to start, see ${LOG_FILE}`); process.exit(1); }
@@ -249,6 +269,10 @@ try {
     case 'note': await cmdNote(args); break;
     case 'tour': await cmdTour(args); break;
     case 'board': case 'boards': await cmdBoard(args); break;
+    case 'design': case 'designs':
+      if (!(await running())) await cmdStart({ ...args, _: [] });
+      await cmdDesign(args, { api, port });
+      break;
     case 'url': console.log(await running() ? await boardUrl() : `http://localhost:${await port()}`); break;
     case 'stop': await cmdStop(); break;
     default: console.log(HELP);

@@ -4,16 +4,19 @@ import type { Board } from './board';
 import type { Boards } from './boards';
 import { fileContent, fileDiff, git, isRepo, remoteBranches, repoRoot } from './git';
 import { lspQuery, type LspOp } from './lsp';
+import type { DesignStore } from './design/store';
+import { designRoute } from './design/routes';
 
 const UI = join(import.meta.dir, '..', 'ui');
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
-export function serve(boards: Boards, port: number) {
+export function serve(boards: Boards, port: number, designs: DesignStore) {
   const encoder = new TextEncoder();
   const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const send = (c: ReadableStreamDefaultController<Uint8Array>, payload: string) => { try { c.enqueue(encoder.encode(payload)); } catch { clients.delete(c); } };
   // every board's changes go to every client: the open board refreshes, the sidebar updates its entries
   boards.onChange(e => { const payload = 'boards' in e ? `event: boards\ndata: {}\n\n` : `event: change\ndata: ${JSON.stringify(e)}\n\n`; for (const c of clients) send(c, payload); });
+  designs.onChange(e => { const payload = `event: design\ndata: ${JSON.stringify(e)}\n\n`; for (const c of clients) send(c, payload); });
   setInterval(() => { for (const c of clients) send(c, `: ping\n\n`); }, 15000);
 
   return Bun.serve({
@@ -25,7 +28,9 @@ export function serve(boards: Boards, port: number) {
       const p = url.pathname;
 
       if (p === '/' || p === '/index.html') return new Response(Bun.file(join(UI, 'index.html')));
-      if (p === '/app.js' || p === '/styles.css') return new Response(Bun.file(join(UI, p.slice(1))));
+      if (p === '/app.js' || p === '/styles.css' || p === '/design.js' || p === '/design.css') return new Response(Bun.file(join(UI, p.slice(1))), { headers: { 'cache-control': 'no-store' } });
+      if (p === '/design' || p === '/design.html') return new Response(Bun.file(join(UI, 'design.html')), { headers: { 'cache-control': 'no-store' } });
+      if (p === '/api/designs' || p.startsWith('/api/designs/') || p.startsWith('/api/d/')) return designRoute(designs, p, req, url);
 
       if (p === '/events') {
         let ctrl: ReadableStreamDefaultController<Uint8Array>;

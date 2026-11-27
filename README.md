@@ -67,6 +67,37 @@ diffboard board list | current | rename <id> <name> | rm <id>   # rm archives to
 Every other command picks its board from `--board <id>`, then `$DIFFBOARD_BOARD`, then the board
 that watches the current directory, then `default`. Board links carry `#board=<id>`.
 
+## Design boards
+
+Before code exists, an agent and you agree on the solution on an infinite canvas: the **data model**
+(tables in module frames, relations, sample rows), the **process** (lanes, steps and which tables
+each step creates, reads, updates or deletes), **state machines** and the **assumptions** everything
+rests on. Open it at `http://localhost:4700/design`.
+
+- **In the repo.** A design is `docs/boards/<id>.board.json` in the project, with its history
+  (`history.jsonl`) and approved versions (`v1.json`, …) next to it: it travels with the branch and
+  the pull request, and a checkout reloads it.
+- **Operations, not drawing.** Agents change the design with operations (`add-table`,
+  `set-column`, `add-step`, …) over the CLI; the canvas lays them out. Every change has an author
+  and can be undone; a batch applies all or nothing.
+- **Proposals.** A refactor arrives as a proposal you see as a diff on the canvas (added, removed,
+  changed) and accept or reject; the agent can block on your decision.
+- **Rules on the schema.** Missing or mistyped references, a foreign key from one business module
+  into another, columns every module table must have, steps writing tables that do not exist,
+  unreachable states.
+- **Shared by sessions.** Other agents join as `edit`, `propose` (proposals only) or `read`.
+- **Approved versions.** You approve a version; the implementing agent reads it as markdown, DBML
+  or a mermaid ER diagram.
+
+```bash
+diffboard design new "Room bookings" ~/code/app      # prints id + url
+diffboard design table room --module rooms --col "id uuid pk" --col "name text"
+diffboard design op --file ops.json                  # diffboard design ops lists every operation
+diffboard design propose --title "…" --file p.json && diffboard design wait P1
+diffboard design show [--format md|dbml|mermaid|json]
+diffboard design check | list | history | approve
+```
+
 ## Graph, files and editing
 
 The title bar switches the graph between **Changes** (changed files and their import neighbours)
@@ -134,7 +165,9 @@ go in `~/.diffboard/skill.local.md`; the skill tells agents to read that file wh
 ## State
 
 Everything lives in `~/.diffboard/`: `config.json` (port), `boards/<id>/` (repos, notes, tours,
-review marks per board), `archive/`, `server.log`.
+review marks per board), `designs.json` (which design files are open; the designs themselves
+live in their repos), `archive/`, `server.log`. `DIFFBOARD_HOME` and `DIFFBOARD_PORT` run a
+second, separate server (tests, sandboxes).
 
 ## License
 

@@ -1,6 +1,6 @@
 ---
 name: diffboard
-description: Show code changes on the live diffboard whiteboard while implementing, and attach notes or mermaid diagrams to the files you touch. Use whenever you start or continue implementation work in a repository the user will review, when the user says "diffboard", "whiteboard", "tablica", "pokaż zmiany na tablicy", "dodaj notatkę do pliku", or pastes a reference like /path/file.ts:12-30 or a localhost:4700 board link.
+description: Agree on a solution's data model, process and assumptions with the user on a design board before writing code, then show code changes on the live diffboard whiteboard while implementing, and attach notes or mermaid diagrams to the files you touch. Use whenever you start or continue implementation work in a repository the user will review, when you are about to design tables, a schema change, a process or a new feature's data layer (design first), when the user says "diffboard", "whiteboard", "tablica", "tablica projektu", "design board", "zaprojektuj", "zaproponuj schemat", "pokaż zmiany na tablicy", "dodaj notatkę do pliku", or pastes a reference like /path/file.ts:12-30 or a localhost:4700 board link.
 ---
 
 # diffboard
@@ -94,6 +94,60 @@ erDiagram
 |---|---|---|---|
 | 0b9e…42 | 7f3c…a1 (anna.nowak@…) | 12990 | paid |
 | 5d21…07 | 7f3c…a1 (anna.nowak@…) | 4500 | refunded |
+
+## Design before code: design boards
+
+Before you implement anything that adds or changes tables, relations, a process or its states,
+put your proposal on a **design board** and let the user shape it. The user cares most about the
+data layer: a wrong storage model makes every layer above it harder. Code starts from the approved
+version, not from the chat.
+
+A design is a text file in the project repo, `docs/boards/<id>.board.json` (history and approved
+versions in `docs/boards/<id>/`), so it travels with the branch and shows up in the PR. The user
+edits it on an infinite canvas at `http://localhost:4700/design#d=<id>`; you change it with
+operations. Set your name first: `export DIFFBOARD_AUTHOR=agent:<session-or-task>`.
+
+```bash
+diffboard design new "<task name>" <repo> --purpose "<what we are deciding>"   # prints id + url
+diffboard design show                 # the whole design as markdown: read it before every change
+diffboard design check                # rule findings; exit 2 when there are errors
+diffboard design ops                  # every operation with its fields
+diffboard design table reservation --module rooms --col "id uuid pk" --col "room_id uuid ref=room.id" --col "status reservation_status"
+diffboard design column reservation "hold_expires_at timestamptz null"
+diffboard design op --file ops.json   # any batch of operations, applied all-or-nothing
+```
+
+Build the first version yourself (with `op`), then hand it over: give the user the url once.
+
+- **Modules.** Put every table in its module (`--module`). Declare shared platform modules with
+  `{"op":"add-module","name":"people","kind":"platform"}`. A foreign key from one business module
+  into another is an error (`module-boundary`): keep the id with `fk:false` and say which public API
+  reads it. Repo rules like "every module table has team_id" go in
+  `{"op":"set-rules","requiredColumns":["team_id"]}` when the project's AGENTS.md says so.
+- **Samples.** Give every table 2-3 realistic sample rows (`set-samples`), with ids that point at
+  the sample rows of related tables. They show whether the model works on real data.
+- **Process.** Lanes are actors (`Guest`, `System (rooms)`, `Payments`), steps say which tables they
+  create/read/update/delete (`touches`), flows connect them. A step that writes a table which does
+  not exist is flagged: that is a gap in the data model, not in the process.
+- **States.** A status column gets a state machine (`set-machine`) whose transitions name the steps.
+- **Assumptions.** Every decision the model rests on is an assumption (`accepted`), every open
+  point a `question` for the user. Do not bury questions in chat.
+
+**After the user has looked at it, change things through proposals**, not directly: a refactor,
+a split table, a renamed concept. The user sees them on the canvas as a diff (green added, red
+removed, amber changed) and accepts or rejects them.
+
+```bash
+diffboard design propose --title "status as event history" --rationale "<why, trade-offs>" --file p.json
+diffboard design wait P3              # blocks until the user decides; prints their comments
+diffboard design comment "<answer>" --target proposal:P3
+```
+
+Other agents can share a board: `diffboard design join --as propose` (only proposals) or
+`--as read` (context only), with `--design <id>` or `DIFFBOARD_DESIGN=<id>` when the repo has several.
+The user approves a version on the canvas (`v1`, `v2`…); only then implement, starting from
+`diffboard design show` (and `--format dbml` / `mermaid` when useful). If the implementation has
+to deviate from the approved design, propose the change on the board first.
 
 ## Review tour
 

@@ -77,6 +77,7 @@ export interface Design {
   rev: number;                 // bumps on every applied batch of operations
   approved?: Approval;         // the last approved version
   draft?: boolean;             // true once the model changed after the last approval
+  processY?: number;           // top of the process lanes; kept below the data model by reflow()
   modules: ModuleDef[];
   rules: Rules;
   tables: Table[];
@@ -193,7 +194,7 @@ function occupied(d: Design, t: Table): Box[] {
   for (const a of d.assumptions) if (a.x !== undefined) out.push({ x: a.x, y: a.y!, w: 230, h: 140 });
   for (const m of d.machines) if (m.x !== undefined) out.push({ x: m.x, y: m.y!, w: 480, h: 320 });
   // the process runs in lanes across the whole width
-  if (d.steps.length || d.lanes.length) out.push({ x: -1e6, y: PROCESS_TOP - 40, w: 2e6, h: Math.max(1, d.lanes.length) * LANE_H + 80 });
+  if (d.steps.length || d.lanes.length) out.push({ x: -1e6, y: processTop(d) - 40, w: 2e6, h: Math.max(1, d.lanes.length) * LANE_H + 80 });
   return out;
 }
 /** Next to the tables of its module, in the first spot that covers nothing; other modules keep their own columns. */
@@ -218,15 +219,41 @@ function placeTable(d: Design, t: Table) {
   const edge = Math.max(-TABLE_W - 140, ...taken.filter(b => b.w < 1e5).map(b => b.x + b.w));
   t.x = d.tables.some(x => x !== t && x.x !== undefined) || taken.some(b => b.w < 1e5) ? edge + 140 : 0;
   t.y = mates.length ? Math.min(...mates.map(m => m.y!)) : 0;
-  while (!free(t.x, t.y) && t.y < PROCESS_TOP) t.y += 60;
+  while (!free(t.x, t.y) && t.y < processTop(d)) t.y += 60;
   if (!free(t.x, t.y)) { t.y = mates.length ? Math.min(...mates.map(m => m.y!)) : 0; t.x += TABLE_W + 140; }
 }
 export const PROCESS_TOP = 900, LANE_H = 120, STEP_W = 180, STEP_GAP = 50;
+export const processTop = (d: Design) => d.processY ?? PROCESS_TOP;
+/** Same geometry the canvas draws a state machine with: up to three states per row. */
+export function machineSize(m: Machine) {
+  const per = Math.min(3, m.states.length), rows = Math.ceil(m.states.length / per);
+  return { w: 48 + (per - 1) * 160 + 116, h: 58 + (rows - 1) * 78 + 30 };
+}
+/**
+ * The process runs in lanes across the whole width, under everything else: tables, state machines
+ * and notes. When they grow past its top, the lanes move down; a module's tables are never split
+ * by the process.
+ */
+export function reflow(d: Design) {
+  if (!d.steps.length && !d.lanes.length) return;
+  const top = processTop(d);
+  const bottoms = [
+    ...d.tables.filter(t => t.y !== undefined).map(t => t.y! + tableHeight(t)),
+    ...d.machines.filter(m => m.y !== undefined).map(m => m.y! + machineSize(m).h),
+    ...d.assumptions.filter(a => a.y !== undefined).map(a => a.y! + 150),
+  ];
+  const need = Math.max(top, ...bottoms.map(b => b + 80));
+  if (need <= top) return;
+  const dy = Math.ceil((need - top) / 20) * 20;
+  d.processY = top + dy;
+  for (const s of d.steps) if (s.y !== undefined) s.y += dy;
+}
+
 function placeStep(d: Design, s: Step, after?: string) {
   const lane = Math.max(0, d.lanes.indexOf(s.lane ?? ''));
   const prev = after ? d.steps.find(x => x.id === after) : undefined;
   const x = prev?.x !== undefined ? prev.x + STEP_W + STEP_GAP : Math.max(-1, ...d.steps.filter(x => x !== s && x.x !== undefined).map(x => x.x!)) + STEP_W + STEP_GAP;
-  s.x = Math.max(160, x); s.y = PROCESS_TOP + lane * LANE_H + 30;
+  s.x = Math.max(160, x); s.y = processTop(d) + lane * LANE_H + 30;
 }
 function placeAssumption(d: Design, a: Assumption) {
   const tablesRight = Math.max(0, ...d.tables.map(t => (t.x ?? 0) + TABLE_W));
@@ -367,7 +394,7 @@ export function applyOp(d: Design, op: Op, author = 'you') {
       if (op.lane !== undefined) {
         s.lane = text(op.lane, 'lane');
         if (!d.lanes.includes(s.lane)) d.lanes.push(s.lane);
-        s.y = PROCESS_TOP + d.lanes.indexOf(s.lane) * LANE_H + 30;
+        s.y = processTop(d) + d.lanes.indexOf(s.lane) * LANE_H + 30;
       }
       if (op.trigger !== undefined) { if (op.trigger) s.trigger = op.trigger; else delete s.trigger; }
       if (op.note !== undefined) { if (op.note) s.note = op.note; else delete s.note; }
@@ -401,8 +428,9 @@ export function applyOp(d: Design, op: Op, author = 'you') {
       const m = d.machines.find(x => x.table === t.name && x.column === op.column);
       if (m) { m.states = states; m.transitions = transitions; }
       else {
-        const right = Math.max(0, ...d.tables.map(x => (x.x ?? 0) + TABLE_W));
-        d.machines.push({ table: t.name, column: op.column, states, transitions, x: right + 200, y: 640 + d.machines.length * 360 });
+        const right = Math.max(0, ...d.tables.map(x => (x.x ?? 0) + TABLE_W), ...d.assumptions.map(a => (a.x ?? 0) + 230));
+        const below = Math.max(0, ...d.machines.filter(x => (x.x ?? 0) >= right).map(x => x.y! + machineSize(x).h + 40));
+        d.machines.push({ table: t.name, column: op.column, states, transitions, x: right + 120, y: below });
       }
       return;
     }
@@ -454,6 +482,7 @@ export function applyOps(d: Design, ops: Op[], author = 'you'): Design {
     try { applyOp(next, op, author); }
     catch (e) { throw new OpError(ops.length > 1 ? `op ${i + 1} (${op?.op}): ${(e as Error).message}` : (e as Error).message); }
   });
+  reflow(next);
   return next;
 }
 

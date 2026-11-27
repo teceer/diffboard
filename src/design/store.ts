@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { applyOps, clone, diffDesigns, emptyDesign, layoutOnly, OpError, type Design, type Op, type Proposal, type Role } from './model';
+import { applyOps, clone, diffDesigns, emptyDesign, layoutOnly, OpError, reflow, type Design, type Op, type Proposal, type Role } from './model';
 import { check } from './rules';
 
 /** Where one design lives: a text file in the project repo, so it travels with the branch and the PR. */
@@ -318,5 +318,6 @@ function normalize(raw: any): Design {
   for (const k of ['modules', 'tables', 'enums', 'lanes', 'steps', 'flows', 'machines', 'assumptions', 'proposals', 'comments', 'participants'] as const) if (!Array.isArray(d[k])) (d as any)[k] = [];
   for (const t of d.tables) if (!Array.isArray(t.columns)) t.columns = [];
   for (const s of d.steps) if (!Array.isArray(s.touches)) s.touches = [];
+  reflow(d); // boards laid out before the process moved with the data model
   return d;
 }

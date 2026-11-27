@@ -3,7 +3,9 @@
    revision and the page refetches, so agents and people editing at once always see one truth. */
 'use strict';
 
-const TABLE_W = 260, HEAD_H = 34, ROW_H = 22, STEP_W = 180, LANE_H = 120, PROCESS_TOP = 900;
+const TABLE_W = 260, HEAD_H = 34, ROW_H = 22, STEP_W = 180, LANE_H = 120;
+/** Top of the process lanes: the server keeps it below the data model (design.processY). */
+const ptop = d => d?.processY ?? 900;
 const PILL_W = 116, PILL_H = 30, PILL_DX = 160, PILL_DY = 78;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -259,8 +261,9 @@ function processFrame(d) {
   const x = Math.min(0, ...xs.map(v => v - 160));
   const right = Math.max(x + 700, ...xs.map(v => v + STEP_W + 40));
   const lanes = Math.max(1, d.lanes.length);
-  const bottom = Math.max(PROCESS_TOP + lanes * LANE_H, ...d.steps.map(s => (s.y ?? PROCESS_TOP) + 96));
-  return { x, y: PROCESS_TOP - 14, w: right - x, h: bottom - PROCESS_TOP + 24 };
+  const top = ptop(d);
+  const bottom = Math.max(top + lanes * LANE_H, ...d.steps.map(s => (s.y ?? top) + 96));
+  return { x, y: top - 14, w: right - x, h: bottom - top + 24 };
 }
 function machineGeom(m) {
   const per = Math.min(3, m.states.length);
@@ -331,7 +334,7 @@ function renderCanvas() {
     const pf = processFrame(d);
     if (pf) {
       world.appendChild(h(`<div class="frame proc" style="left:${pf.x}px;top:${pf.y}px;width:${pf.w}px;height:${pf.h}px"><span class="ft">⇢ process</span></div>`));
-      d.lanes.forEach((l, i) => world.appendChild(h(`<div class="lane" style="left:${pf.x}px;width:${pf.w}px;top:${PROCESS_TOP + i * LANE_H}px;${i ? '' : 'border-top:0'}">${esc(l)}</div>`)));
+      d.lanes.forEach((l, i) => world.appendChild(h(`<div class="lane" style="left:${pf.x}px;width:${pf.w}px;top:${ptop(d) + i * LANE_H}px;${i ? '' : 'border-top:0'}">${esc(l)}</div>`)));
       const sp = new Map(d.steps.map(s => [s.id, s]));
       for (const f of d.flows) {
         const a = sp.get(f.from), b = sp.get(f.to); if (!a || !b) continue;
@@ -613,7 +616,7 @@ async function place(kind, at) {
   } else if (kind === 'step') {
     const r = await form('Add process step', [['title', 'Title', 'e.g. Guest pays'], ['lane', 'Lane', d.lanes.join(', ') || 'e.g. Guest'], ['after', 'After step', d.steps.length ? d.steps[d.steps.length - 1].id : 'optional']]);
     if (!r?.title) return;
-    const res = await op({ op: 'add-step', title: r.title, ...(r.lane ? { lane: r.lane } : {}), ...(r.after ? { after: r.after } : {}), ...(at.y > PROCESS_TOP - 40 ? { x, y } : {}) });
+    const res = await op({ op: 'add-step', title: r.title, ...(r.lane ? { lane: r.lane } : {}), ...(r.after ? { after: r.after } : {}), ...(at.y > ptop(design()) - 40 ? { x, y } : {}) });
     if (res) { const s = design().steps[design().steps.length - 1]; if (s) select({ kind: 'step', id: s.id }); }
   } else if (kind === 'assumption') {
     const r = await form('Add assumption', [['text', 'Text', 'What we take as given, or a question to settle', 'area'], ['status', 'Status', 'open', 'select:open,accepted,question']]);

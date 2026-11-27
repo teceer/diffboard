@@ -270,3 +270,57 @@ test('a table added to a design with a process never lands on the lanes or on no
   const a = d.assumptions[0];
   for (const t of d.tables) expect(t.x! + 260 <= a.x! || t.x! >= a.x! + 230 || t.y! + 300 <= a.y! || t.y! >= a.y! + 140).toBe(true);
 });
+
+describe('the process stays under the data model', () => {
+  const cols = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `c${i}`, type: 'text' }));
+  test('long module columns push the lanes down below every table', () => {
+    let d = applyOps(emptyDesign('x', 'x'), [
+      { op: 'add-step', id: 'S1', title: 'a', lane: 'Guest' },
+      { op: 'add-lane', name: 'System' },
+    ]);
+    const before = d.steps[0].y!;
+    // a column of tables placed by hand, as an agent does, running past y=900
+    d = applyOps(d, [0, 1, 2, 3].map(i => ({ op: 'add-table' as const, table: `t${i}`, module: 'identity', columns: cols(10), x: 0, y: i * 300 })));
+    const bottom = Math.max(...d.tables.map(t => t.y! + 34 + t.columns.length * 22 + 8));
+    expect(d.processY!).toBeGreaterThanOrEqual(bottom + 80);
+    expect(d.steps[0].y! - before).toBe(d.processY! - 900);
+  });
+
+  test('state machines land beside the tables, never on the lanes', () => {
+    const d = applyOps(emptyDesign('x', 'x'), [
+      { op: 'add-table', table: 'member', columns: [{ name: 'id', type: 'uuid', pk: true }, { name: 'state', type: 'text' }] },
+      { op: 'add-step', id: 'S1', title: 'a', lane: 'Guest' },
+      { op: 'set-machine', table: 'member', column: 'state', states: ['a', 'b', 'c', 'd', 'e'] },
+      { op: 'set-machine', table: 'member', column: 'id', states: ['x', 'y'] },
+    ]);
+    for (const m of d.machines) expect(m.y! + 200).toBeLessThanOrEqual((d.processY ?? 900) - 40);
+  });
+
+  test('a board saved before the fix is repaired when it is loaded', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dfb-design-'));
+    const repo = await mkdtemp(join(tmpdir(), 'dfb-repo-'));
+    const s = new DesignStore(join(home, 'designs.json'));
+    const d = await s.create('old', repo);
+    const raw = JSON.parse(await readFile(s.file(d.id), 'utf8'));
+    raw.lanes = ['Guest'];
+    raw.steps = [{ id: 'S1', title: 'a', lane: 'Guest', touches: [], x: 160, y: 930 }];
+    raw.tables = [{ name: 'big', columns: cols(40), x: 0, y: 0 }];
+    await writeFile(s.file(d.id), JSON.stringify(raw));
+    s.closeAll();
+    const again = new DesignStore(join(home, 'designs.json'));
+    await again.load();
+    const loaded = again.get(d.id);
+    expect(loaded.processY!).toBeGreaterThan(34 + 40 * 22);
+    expect(loaded.steps[0].y!).toBeGreaterThan(loaded.processY!);
+    again.closeAll();
+  });
+});
+
+test('tables below the old process top stay where they are: the lanes go under all of them', () => {
+  const d = applyOps(emptyDesign('x', 'x'), [
+    { op: 'add-step', id: 'S1', title: 'a', lane: 'Guest' },
+    { op: 'add-table', table: 'low', columns: [{ name: 'id', type: 'uuid', pk: true }], x: 0, y: 1500 },
+  ]);
+  expect(d.tables[0].y).toBe(1500);
+  expect(d.processY!).toBeGreaterThanOrEqual(1500 + 34 + 22 + 8 + 80);
+});

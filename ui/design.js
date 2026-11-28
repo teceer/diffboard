@@ -4,6 +4,10 @@
 'use strict';
 
 const TABLE_W = 260, HEAD_H = 34, ROW_H = 22, STEP_W = 180, LANE_H = 120;
+/* same geometry as src/design/model.ts: the server lays the board out with it */
+const SAMPLE_W = 112, MAX_SAMPLES = 2, STICKY_W = 220;
+const tableW = (t) => TABLE_W + Math.min(MAX_SAMPLES, t.samples?.length || 0) * SAMPLE_W;
+const stickyH = (a) => Math.ceil(44 + a.text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.length / 29)), 0) * 17.5 + (a.author ? 18 : 0));
 /** Top of the process lanes: the server keeps it below the data model (design.processY). */
 const ptop = d => d?.processY ?? 900;
 const PILL_W = 116, PILL_H = 30, PILL_DX = 160, PILL_DY = 78;
@@ -216,10 +220,10 @@ function applyView() {
 
 function bounds(d) {
   const r = [];
-  if (S.layers.data) for (const t of d.tables) r.push([t.x ?? 0, t.y ?? 0, TABLE_W, tableH(t), 't']);
+  if (S.layers.data) for (const t of d.tables) r.push([t.x ?? 0, t.y ?? 0, tableW(t), tableH(t), 't']);
   if (S.layers.process) { for (const s of d.steps) r.push([s.x ?? 0, s.y ?? 0, STEP_W, 70, 'p']); const pf = processFrame(d); if (pf) r.push([pf.x, pf.y, pf.w, pf.h, 'p']); }
   if (S.layers.states) for (const m of d.machines) { const g = machineGeom(m); r.push([m.x ?? 0, m.y ?? 0, g.w, g.h, 'm']); }
-  if (S.layers.assumptions) for (const a of d.assumptions) r.push([a.x ?? 0, a.y ?? 0, 220, 110, 'a']);
+  if (S.layers.assumptions) for (const a of d.assumptions) r.push([a.x ?? 0, a.y ?? 0, STICKY_W, stickyH(a), 'a']);
   return r;
 }
 function fit() {
@@ -301,7 +305,7 @@ function renderCanvas() {
     for (const t of d.tables) if (t.module) { if (!mods.has(t.module)) mods.set(t.module, []); mods.get(t.module).push(t); }
     for (const [m, ts] of mods) {
       const x0 = Math.min(...ts.map(t => t.x)) - 28, y0 = Math.min(...ts.map(t => t.y)) - 34;
-      const x1 = Math.max(...ts.map(t => t.x + TABLE_W)) + 28, y1 = Math.max(...ts.map(t => t.y + tableH(t))) + 24;
+      const x1 = Math.max(...ts.map(t => t.x + tableW(t))) + 28, y1 = Math.max(...ts.map(t => t.y + tableH(t))) + 24;
       const kind = modKind(d, m), def = d.modules.find(x => x.name === m);
       world.appendChild(h(`<div class="frame ${kind === 'platform' ? 'plat' : ''}" style="left:${x0}px;top:${y0}px;width:${x1 - x0}px;height:${y1 - y0}px"><span class="ft">▣ ${kind === 'platform' ? 'platform' : 'module'} <code>${esc(m)}</code>${def?.path ? ` <span class="chip c-mod">${esc(def.path)}</span>` : ''}</span></div>`));
     }
@@ -316,8 +320,8 @@ function renderCanvas() {
       const color = bad ? 'var(--del)' : st === 'add' ? 'var(--add)' : st === 'del' ? 'var(--del)' : '#9aa0ad';
       const ay = rowY(t, c.name), by = rowY(p, c.ref.column);
       let ax, bx, da, db;
-      if (t.x + TABLE_W < p.x) { ax = t.x + TABLE_W; bx = p.x; da = 1; db = -1; }
-      else if (p.x + TABLE_W < t.x) { ax = t.x; bx = p.x + TABLE_W; da = -1; db = 1; }
+      if (t.x + tableW(t) < p.x) { ax = t.x + tableW(t); bx = p.x; da = 1; db = -1; }
+      else if (p.x + tableW(p) < t.x) { ax = t.x; bx = p.x + tableW(p); da = -1; db = 1; }
       else { ax = t.x; bx = p.x; da = -1; db = -1; }
       const k = Math.max(40, Math.abs(bx - ax) / 2);
       const w = path(`M${ax},${ay} C${ax + da * k},${ay} ${bx + db * k},${by} ${bx},${by}`, { stroke: color, 'stroke-width': bad ? 1.8 : 1.4, ...(c.fk === false || bad ? { 'stroke-dasharray': '5 4' } : {}) });
@@ -377,7 +381,7 @@ function renderCanvas() {
   /* assumptions */
   if (S.layers.assumptions && d.assumptions.length) {
     const xs = d.assumptions.map(a => a.x ?? 0), ys = d.assumptions.map(a => a.y ?? 0);
-    const x0 = Math.min(...xs) - 20, y0 = Math.min(...ys) - 28, x1 = Math.max(...xs) + 240, y1 = Math.max(...ys) + 130;
+    const x0 = Math.min(...xs) - 20, y0 = Math.min(...ys) - 28, x1 = Math.max(...xs) + STICKY_W + 20, y1 = Math.max(...d.assumptions.map(a => (a.y ?? 0) + stickyH(a))) + 20;
     world.appendChild(h(`<div class="frame asm" style="left:${x0}px;top:${y0}px;width:${x1 - x0}px;height:${y1 - y0}px"><span class="ft">✦ assumptions and questions</span></div>`));
     for (const a of d.assumptions) world.appendChild(sticky(a, dimCls(a._st)));
   }
@@ -387,14 +391,17 @@ function renderCanvas() {
 function tableCard(d, t, { dim, badCols, touch, dimmed }) {
   const sel = S.sel?.kind === 'table' && S.sel.id === t.name;
   const kind = t.module ? modKind(d, t.module) : null;
-  const el = h(`<div class="tbl ${t.kind === 'view' ? 'view' : ''} ${sel ? 'sel' : ''} ${dim} ${dimmed ? 'dim' : ''}" data-kind="table" data-id="${esc(t.name)}" style="left:${t.x}px;top:${t.y}px">
-    <div class="th" data-drag="1"><b>${esc(t.name)}</b>${t.kind === 'view' ? '<span class="chip c-ok">view</span>' : ''}${t.module ? `<span class="chip ${kind === 'platform' ? 'c-plat' : 'c-mod'}">${esc(t.module)}</span>` : ''}<span class="cnt">${t.columns.length}</span></div></div>`);
+  // sample rows sit beside the types, so the data is readable without opening the table
+  const samples = (t.samples || []).slice(0, MAX_SAMPLES), more = (t.samples?.length || 0) - samples.length;
+  const cell = (v) => v === undefined || v === '' ? '<span class="sv none">·</span>' : `<span class="sv" title="${esc(v)}">${esc(v)}</span>`;
+  const el = h(`<div class="tbl ${t.kind === 'view' ? 'view' : ''} ${sel ? 'sel' : ''} ${dim} ${dimmed ? 'dim' : ''}" data-kind="table" data-id="${esc(t.name)}" style="left:${t.x}px;top:${t.y}px;width:${tableW(t)}px">
+    <div class="th" data-drag="1"><b>${esc(t.name)}</b>${t.kind === 'view' ? '<span class="chip c-ok">view</span>' : ''}${t.module ? `<span class="chip ${kind === 'platform' ? 'c-plat' : 'c-mod'}">${esc(t.module)}</span>` : ''}<span class="cnt">${t.columns.length}</span>${samples.map((_, i) => `<span class="sh">${i ? '' : 'sample rows'}${i === samples.length - 1 && more ? ` <span class="more">+${more}</span>` : ''}</span>`).join('')}</div></div>`);
   const hlCols = new Set(touch?.columns || []);
   const hlCol = sel ? S.sel.column : null;
   for (const c of t.columns) {
     const k = c.pk ? 'PK' : c.ref ? 'FK' : '';
     const cls = [c._st || '', badCols.has(`${t.name}.${c.name}`) ? 'bad' : '', hlCols.has(c.name) || hlCol === c.name ? 'hl' : ''].join(' ');
-    const row = h(`<div class="row ${cls}" data-col="${esc(c.name)}" title="${esc([c.note, c.ref ? `→ ${c.ref.table}.${c.ref.column}${c.fk === false ? ' (no constraint)' : ''}` : '', c.default ? `default ${c.default}` : ''].filter(Boolean).join(' · '))}"><span class="k ${k.toLowerCase()}">${k}</span><span class="cn" data-edit="name">${esc(c.name)}</span><span class="ty" data-edit="type">${esc(c.type)}</span><span class="nn ${c.nullable ? 'no' : ''}"></span></div>`);
+    const row = h(`<div class="row ${cls}" data-col="${esc(c.name)}" title="${esc([c.note, c.ref ? `→ ${c.ref.table}.${c.ref.column}${c.fk === false ? ' (no constraint)' : ''}` : '', c.default ? `default ${c.default}` : ''].filter(Boolean).join(' · '))}"><span class="k ${k.toLowerCase()}">${k}</span><span class="cn" data-edit="name">${esc(c.name)}</span><span class="ty" data-edit="type">${esc(c.type)}</span><span class="nn ${c.nullable ? 'no' : ''}"></span>${samples.map(r => cell(r[c.name])).join('')}</div>`);
     el.appendChild(row);
   }
   if (!t._st && !d._preview) el.appendChild(h(`<div class="row addc" data-addcol="1"><span class="k"></span>+ column</div>`));
@@ -601,6 +608,11 @@ function setTool(t) {
 }
 $('#tool').addEventListener('click', (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); });
 $('#fitBtn').onclick = fit;
+async function arrangeBoard() {
+  if (!S.id || S.preview) return;
+  if (await ops([{ op: 'arrange' }])) { fit(); toast('Board arranged · Undo restores the previous layout'); }
+}
+$('#arrangeBtn').onclick = arrangeBoard;
 $('#zoom').onclick = fit;
 
 async function place(kind, at) {
@@ -934,7 +946,7 @@ async function togglePreview(pid) {
 function fitChanges() {
   const d = shown(); if (!d?._preview) return;
   const r = [];
-  for (const t of d.tables) if (t._st) r.push([t.x, t.y, TABLE_W, tableH(t)]);
+  for (const t of d.tables) if (t._st) r.push([t.x, t.y, tableW(t), tableH(t)]);
   if (!r.length || !isPhone()) {
     for (const s of d.steps) if (s._st) r.push([s.x, s.y, STEP_W, 70]);
     for (const a of d.assumptions) if (a._st) r.push([a.x, a.y, 220, 110]);
@@ -1163,6 +1175,7 @@ document.addEventListener('keydown', (e) => {
   const tools = { v: 'select', t: 'table', s: 'step', a: 'assumption' };
   if (tools[e.key] && design()) setTool(tools[e.key]);
   if (e.key === 'f') fit();
+  if (e.key === 'l') arrangeBoard();
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel && !S.preview) {
     const s = S.sel;
     if (s.kind === 'table' && s.column) op({ op: 'remove-column', table: s.id, column: s.column });

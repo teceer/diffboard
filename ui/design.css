@@ -130,6 +130,11 @@ svg.wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-even
 .row .nn { color: var(--del); width: 6px; flex-shrink: 0; }
 .row .nn::before { content: "•"; }
 .row .nn.no::before { content: ""; }
+/* sample rows beside the types: each cell is SAMPLE_W (112px) wide including the gap */
+.row .sv { width: 106px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); border-left: 1px solid var(--line-soft); padding-left: 7px; margin-left: 0; height: 100%; line-height: 22px; background: var(--sunken); }
+.row .sv.none { color: var(--faint); }
+.tbl .th .sh { width: 106px; flex-shrink: 0; font: 600 9.5px var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--faint); padding-left: 7px; white-space: nowrap; }
+.tbl .th .sh .more { font: 10px var(--mono); text-transform: none; letter-spacing: 0; color: var(--accent); }
 .row:hover { background: var(--sunken); }
 .row.addc { color: var(--faint); font-family: var(--sans); font-size: 11.5px; cursor: pointer; }
 .row.addc:hover { color: var(--accent); }

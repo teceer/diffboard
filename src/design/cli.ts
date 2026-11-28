@@ -19,6 +19,7 @@ Author: --author or $DIFFBOARD_AUTHOR (e.g. agent:checkout).
   diffboard design wait <P1> [--timeout 1800]               block until the user decides; prints the comments
   diffboard design comment <text> [--target proposal:P1|table:<name>|step:<id>]
   diffboard design comments | history | undo | approve
+  diffboard design arrange                                  lay the whole board out again (only positions change; undo restores)
   diffboard design ops                                      every operation with its fields`;
 
 const OPS_HELP = `Operations (JSON objects with "op"; send several as a list, applied all-or-nothing):
@@ -37,6 +38,7 @@ const OPS_HELP = `Operations (JSON objects with "op"; send several as a list, ap
   {"op":"add-flow","from":"S1","to":"S2","label?":"paid"}   {"op":"remove-flow","from":"S1","to":"S2"}
   {"op":"set-machine","table":"reservation","column":"status","states":["held","paid"],"transitions":[{"from":"held","to":"paid","step?":"S4"}]}
   {"op":"remove-machine","table":"t","column":"c"}
+  {"op":"arrange"}   lays the whole board out again: modules in balanced columns, states and assumptions beside, process below
   {"op":"add-assumption","id?":"A1","text":"…","status?":"accepted|open|question|rejected"}   {"op":"set-assumption","id":"A1",...}   {"op":"remove-assumption","id":"A1"}
   {"op":"set-design","name?":"","purpose?":""}   {"op":"move","kind":"table|step|assumption|machine","id":"…","x":0,"y":0}`;
 
@@ -218,6 +220,7 @@ export async function cmdDesign(args: Args, ctx: Ctx) {
       for (const e of entries.slice(0, 50)) console.log(`rev ${String(e.rev).padStart(3)}  ${new Date(e.at).toLocaleString()}  ${e.author}  ${e.kind}${e.proposal ? ' ' + e.proposal : ''}${e.ops ? `  ${e.ops.map((o: any) => o.op).join(', ')}` : ''}${e.version ? ` v${e.version}` : ''}`);
       return;
     }
+    case 'arrange': { const r = await post(await d('/ops'), { ops: [{ op: 'arrange' }], author }); console.log(`arranged, rev ${r.rev}`); return; }
     case 'undo': { const r = await post(await d('/undo'), { author }); console.log(`undone, rev ${r.rev}`); return; }
     case 'approve': {
       const r = await post(await d('/approve'), { by: author });

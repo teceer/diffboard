@@ -125,7 +125,10 @@ Build the first version yourself (with `op`), then hand it over: give the user t
   reads it. Repo rules like "every module table has team_id" go in
   `{"op":"set-rules","requiredColumns":["team_id"]}` when the project's AGENTS.md says so.
 - **Samples.** Give every table 2-3 realistic sample rows (`set-samples`), with ids that point at
-  the sample rows of related tables. They show whether the model works on real data.
+  the sample rows of related tables. They show whether the model works on real data, and the
+  canvas shows the first two next to the column types.
+- **Layout.** Do not place things by coordinates. After a large batch (a new module, a reworked
+  process) run `diffboard design arrange` so the user gets a readable board.
 - **Process.** Lanes are actors (`Guest`, `System (rooms)`, `Payments`), steps say which tables they
   create/read/update/delete (`touches`), flows connect them. A step that writes a table which does
   not exist is flagged: that is a gap in the data model, not in the process.

@@ -118,9 +118,10 @@ export type Op =
   | { op: 'add-assumption'; id?: string; text: string; status?: AssumptionStatus; x?: number; y?: number }
   | { op: 'set-assumption'; id: string; text?: string; status?: AssumptionStatus }
   | { op: 'remove-assumption'; id: string }
-  | { op: 'move'; kind: 'table' | 'step' | 'assumption' | 'machine'; id: string; x: number; y: number };
+  | { op: 'move'; kind: 'table' | 'step' | 'assumption' | 'machine'; id: string; x: number; y: number }
+  | { op: 'arrange' };
 
-export const OP_NAMES = ['set-design', 'add-module', 'remove-module', 'set-rules', 'add-table', 'set-table', 'remove-table', 'add-column', 'set-column', 'remove-column', 'set-samples', 'set-enum', 'remove-enum', 'add-lane', 'remove-lane', 'add-step', 'set-step', 'remove-step', 'add-flow', 'remove-flow', 'set-machine', 'remove-machine', 'add-assumption', 'set-assumption', 'remove-assumption', 'move'] as const;
+export const OP_NAMES = ['set-design', 'add-module', 'remove-module', 'set-rules', 'add-table', 'set-table', 'remove-table', 'add-column', 'set-column', 'remove-column', 'set-samples', 'set-enum', 'remove-enum', 'add-lane', 'remove-lane', 'add-step', 'set-step', 'remove-step', 'add-flow', 'remove-flow', 'set-machine', 'remove-machine', 'add-assumption', 'set-assumption', 'remove-assumption', 'move', 'arrange'] as const;
 
 export class OpError extends Error {}
 
@@ -183,44 +184,63 @@ const touches = (list: Touch[] = []) => list.map(t => {
 });
 
 /* ---------- placement: a new item without coordinates lands next to its kind ---------- */
-const TABLE_W = 260, TABLE_GAP = 60, ROW_H = 22, HEAD_H = 34;
-export const tableHeight = (t: Table) => HEAD_H + t.columns.length * ROW_H + 8;
+// The canvas draws with the same numbers (ui/design.js): keep them in step.
+export const TABLE_W = 260, SAMPLE_W = 112, MAX_SAMPLES = 2, ROW_H = 22, HEAD_H = 34;
+const TABLE_GAP = 60, MODULE_GAP = 160, COLUMN_MAX = 900, STICKY_W = 220;
+/** A table shows up to two sample rows as extra columns to the right of the types. */
+export const tableWidth = (t: Table) => TABLE_W + Math.min(MAX_SAMPLES, t.samples?.length ?? 0) * SAMPLE_W;
+/** Header, the columns and the "+ column" row. */
+export const tableHeight = (t: Table) => HEAD_H + (t.columns.length + 1) * ROW_H + 4;
+/** A sticky grows with its text: about 31 characters a 17.5px line at 12px; 29 leaves room for word wrap. */
+export function stickyHeight(a: Assumption) {
+  const lines = a.text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.length / 29)), 0);
+  return Math.ceil(44 + lines * 17.5 + (a.author ? 18 : 0));
+}
 type Box = { x: number; y: number; w: number; h: number };
 const hit = (a: Box, b: Box, pad = 40) => a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
+const tableBox = (t: Table): Box => ({ x: t.x!, y: t.y!, w: tableWidth(t), h: tableHeight(t) });
+const machineBox = (m: Machine): Box => ({ x: m.x!, y: m.y!, ...machineSize(m) });
+const stickyBox = (a: Assumption): Box => ({ x: a.x!, y: a.y!, w: STICKY_W, h: stickyHeight(a) });
 /** Everything already on the canvas a new table must not cover. */
 function occupied(d: Design, t: Table): Box[] {
   const out: Box[] = [];
-  for (const o of d.tables) if (o !== t && o.x !== undefined) out.push({ x: o.x, y: o.y!, w: TABLE_W, h: tableHeight(o) });
-  for (const a of d.assumptions) if (a.x !== undefined) out.push({ x: a.x, y: a.y!, w: 230, h: 140 });
-  for (const m of d.machines) if (m.x !== undefined) out.push({ x: m.x, y: m.y!, w: 480, h: 320 });
+  for (const o of d.tables) if (o !== t && o.x !== undefined) out.push(tableBox(o));
+  for (const a of d.assumptions) if (a.x !== undefined) out.push(stickyBox(a));
+  for (const m of d.machines) if (m.x !== undefined) out.push(machineBox(m));
   // the process runs in lanes across the whole width
   if (d.steps.length || d.lanes.length) out.push({ x: -1e6, y: processTop(d) - 40, w: 2e6, h: Math.max(1, d.lanes.length) * LANE_H + 80 });
   return out;
 }
-/** Next to the tables of its module, in the first spot that covers nothing; other modules keep their own columns. */
+/**
+ * Next to the tables of its module, in the first spot that covers nothing; a module's column
+ * wraps into a new one past COLUMN_MAX, other modules keep their own columns.
+ */
 function placeTable(d: Design, t: Table) {
   const taken = occupied(d, t);
   const mates = d.tables.filter(x => x !== t && x.x !== undefined && (x.module ?? '') === (t.module ?? ''));
   const others = d.tables.filter(x => x !== t && x.x !== undefined && (x.module ?? '') !== (t.module ?? ''));
-  const h = tableHeight(t);
-  const free = (x: number, y: number) => !taken.some(b => hit({ x, y, w: TABLE_W, h }, b))
+  const h = tableHeight(t), w = tableWidth(t);
+  const free = (x: number, y: number) => !taken.some(b => hit({ x, y, w, h }, b))
     // a module's column never slides into another module's frame
-    && !others.some(o => x < o.x! + TABLE_W + 80 && o.x! < x + TABLE_W + 80);
+    && !others.some(o => x < o.x! + tableWidth(o) + 80 && o.x! < x + w + 80);
   const tries: [number, number][] = [];
   if (mates.length) {
     const top = Math.min(...mates.map(m => m.y!));
     const cols = [...new Set(mates.map(m => m.x!))].sort((a, b) => a - b);
-    for (const x of cols) tries.push([x, Math.max(...mates.filter(m => m.x === x).map(m => m.y! + tableHeight(m))) + TABLE_GAP]);
-    const right = cols[cols.length - 1];
-    for (let i = 1; i <= 4; i++) tries.push([right + i * (TABLE_W + TABLE_GAP), top]);
+    for (const x of cols) {
+      const y = Math.max(...mates.filter(m => m.x === x).map(m => m.y! + tableHeight(m))) + TABLE_GAP;
+      if (y + h <= top + COLUMN_MAX) tries.push([x, y]);
+    }
+    const right = Math.max(...mates.map(m => m.x! + tableWidth(m)));
+    for (let i = 0; i < 4; i++) tries.push([right + TABLE_GAP + i * (TABLE_W + TABLE_GAP), top]);
   }
   for (const [x, y] of tries) if (free(x, y)) { t.x = x; t.y = y; return; }
   // a new module (or a full one): right of everything that is there
-  const edge = Math.max(-TABLE_W - 140, ...taken.filter(b => b.w < 1e5).map(b => b.x + b.w));
-  t.x = d.tables.some(x => x !== t && x.x !== undefined) || taken.some(b => b.w < 1e5) ? edge + 140 : 0;
+  const edge = Math.max(-TABLE_W - MODULE_GAP, ...taken.filter(b => b.w < 1e5).map(b => b.x + b.w));
+  t.x = d.tables.some(x => x !== t && x.x !== undefined) || taken.some(b => b.w < 1e5) ? edge + MODULE_GAP : 0;
   t.y = mates.length ? Math.min(...mates.map(m => m.y!)) : 0;
   while (!free(t.x, t.y) && t.y < processTop(d)) t.y += 60;
-  if (!free(t.x, t.y)) { t.y = mates.length ? Math.min(...mates.map(m => m.y!)) : 0; t.x += TABLE_W + 140; }
+  if (!free(t.x, t.y)) { t.y = mates.length ? Math.min(...mates.map(m => m.y!)) : 0; t.x += TABLE_W + MODULE_GAP; }
 }
 export const PROCESS_TOP = 900, LANE_H = 120, STEP_W = 180, STEP_GAP = 50;
 export const processTop = (d: Design) => d.processY ?? PROCESS_TOP;
@@ -229,24 +249,144 @@ export function machineSize(m: Machine) {
   const per = Math.min(3, m.states.length), rows = Math.ceil(m.states.length / per);
   return { w: 48 + (per - 1) * 160 + 116, h: 58 + (rows - 1) * 78 + 30 };
 }
-/**
- * The process runs in lanes across the whole width, under everything else: tables, state machines
- * and notes. When they grow past its top, the lanes move down; a module's tables are never split
- * by the process.
- */
-export function reflow(d: Design) {
-  if (!d.steps.length && !d.lanes.length) return;
-  const top = processTop(d);
-  const bottoms = [
+const snap = (v: number) => Math.ceil(v / 20) * 20;
+/** Moves the process lanes (and their steps) so they start at `top`. */
+function moveProcess(d: Design, top: number) {
+  const dy = top - processTop(d);
+  if (!dy) return;
+  d.processY = top;
+  for (const s of d.steps) if (s.y !== undefined) s.y += dy;
+}
+/** Bottom edge of everything above the process. */
+function contentBottom(d: Design) {
+  return Math.max(-Infinity,
     ...d.tables.filter(t => t.y !== undefined).map(t => t.y! + tableHeight(t)),
     ...d.machines.filter(m => m.y !== undefined).map(m => m.y! + machineSize(m).h),
-    ...d.assumptions.filter(a => a.y !== undefined).map(a => a.y! + 150),
+    ...d.assumptions.filter(a => a.y !== undefined).map(a => a.y! + stickyHeight(a)));
+}
+/**
+ * Keeps the canvas readable after every change: nothing above the process covers anything else
+ * (a table that grew, for instance by its sample rows, pushes what is to its right further right),
+ * and the process runs in lanes across the whole width, under everything else.
+ */
+export function reflow(d: Design) {
+  untangle(d);
+  if (!d.steps.length && !d.lanes.length) return;
+  const need = contentBottom(d) + 80;
+  if (need > processTop(d)) moveProcess(d, processTop(d) + snap(need - processTop(d)));
+}
+/**
+ * Pushes overlapping items apart: within one column the lower item moves down with everything
+ * under it, otherwise the right one moves right with everything right of it.
+ */
+function untangle(d: Design) {
+  type It = { box: () => Box; move: (dx: number, dy: number) => void };
+  const mover = (o: { x?: number; y?: number }) => (dx: number, dy: number) => { o.x! += dx; o.y! += dy; };
+  const items: It[] = [
+    ...d.tables.filter(t => t.x !== undefined).map(t => ({ box: () => tableBox(t), move: mover(t) })),
+    ...d.machines.filter(m => m.x !== undefined).map(m => ({ box: () => machineBox(m), move: mover(m) })),
+    ...d.assumptions.filter(a => a.x !== undefined).map(a => ({ box: () => stickyBox(a), move: mover(a) })),
   ];
-  const need = Math.max(top, ...bottoms.map(b => b + 80));
-  if (need <= top) return;
-  const dy = Math.ceil((need - top) / 20) * 20;
-  d.processY = top + dy;
-  for (const s of d.steps) if (s.y !== undefined) s.y += dy;
+  for (let pass = 0; pass < 300; pass++) {
+    let moved = false;
+    const sorted = [...items].sort((a, b) => a.box().x - b.box().x || a.box().y - b.box().y);
+    outer: for (let i = 0; i < sorted.length; i++) for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i].box(), b = sorted[j].box();
+      if (!hit(a, b, 0)) continue;
+      if (Math.abs(a.x - b.x) < 10) {
+        const dy = a.y + a.h + 24 - b.y;
+        for (const it of items) { const c = it.box(); if (Math.abs(c.x - b.x) < 10 && c.y >= b.y) it.move(0, dy); }
+      } else {
+        const dx = snap(a.x + a.w + 40 - b.x);
+        for (const it of items) if (it.box().x >= b.x) it.move(dx, 0);
+      }
+      moved = true; break outer;
+    }
+    if (!moved) return;
+  }
+}
+/** Tables of one module in reading order: a referenced table before the ones pointing at it, unrelated tables last. */
+function fkOrder(ts: Table[]) {
+  const by = new Map(ts.map(t => [t.name, t]));
+  const linked = new Set<string>();
+  for (const t of ts) for (const c of t.columns) if (c.ref && by.has(c.ref.table) && c.ref.table !== t.name) { linked.add(t.name); linked.add(c.ref.table); }
+  const out: Table[] = [], seen = new Set<string>();
+  const visit = (t: Table) => {
+    if (seen.has(t.name)) return; seen.add(t.name);
+    for (const c of t.columns) if (c.ref && by.has(c.ref.table)) visit(by.get(c.ref.table)!);
+    out.push(t);
+  };
+  for (const t of ts) if (linked.has(t.name)) visit(t);
+  for (const t of ts) visit(t);
+  return out;
+}
+/**
+ * Lays the whole board out again: each module a frame of balanced columns (tables in reference
+ * order), the modules side by side, state machines and then the assumptions to their right,
+ * the process underneath. Only coordinates change.
+ */
+export function arrange(d: Design) {
+  const mods = [...new Set([...d.modules.map(m => m.name), ...d.tables.map(t => t.module ?? '')])];
+  let x = 0;
+  for (const mod of mods) {
+    const ts = fkOrder(d.tables.filter(t => (t.module ?? '') === mod));
+    if (!ts.length) continue;
+    const total = ts.reduce((n, t) => n + tableHeight(t) + TABLE_GAP, -TABLE_GAP);
+    const tallest = Math.max(...ts.map(tableHeight));
+    const target = Math.max(tallest, total / Math.ceil(total / Math.max(COLUMN_MAX, tallest)));
+    const cols: Table[][] = [[]];
+    let y = 0;
+    for (const t of ts) {
+      if (cols[cols.length - 1].length && y + tableHeight(t) > target + 60) { cols.push([]); y = 0; }
+      cols[cols.length - 1].push(t);
+      t.y = y; y += tableHeight(t) + TABLE_GAP;
+    }
+    for (const col of cols) {
+      for (const t of col) t.x = x;
+      x += Math.max(...col.map(tableWidth)) + TABLE_GAP;
+    }
+    x += MODULE_GAP - TABLE_GAP;
+  }
+  if (d.machines.length) {
+    let y = 0;
+    for (const m of d.machines) { m.x = x; m.y = y; y += machineSize(m).h + 60; }
+    x += Math.max(...d.machines.map(m => machineSize(m).w)) + 120;
+  }
+  // stickies in as many columns as keep them about as tall as the data model, each next one under the shortest column
+  const dataH = Math.max(COLUMN_MAX, ...d.tables.map(t => t.y! + tableHeight(t)), ...d.machines.map(m => m.y! + machineSize(m).h));
+  const total = d.assumptions.reduce((n, a) => n + stickyHeight(a) + 24, 0);
+  const colY = Array.from({ length: Math.max(2, Math.ceil(total / dataH)) }, () => 0);
+  for (const a of d.assumptions) {
+    const c = colY.indexOf(Math.min(...colY));
+    a.x = x + c * (STICKY_W + 30); a.y = colY[c]; colY[c] += stickyHeight(a) + 24;
+  }
+  if (d.steps.length || d.lanes.length) {
+    d.processY = snap(Math.max(0, contentBottom(d)) + 120);
+    arrangeProcess(d);
+  }
+}
+/**
+ * Steps left to right in flow order: a step stands right of every step that leads to it (loops
+ * back are ignored), in its own lane, and never on top of another step of that lane.
+ */
+function arrangeProcess(d: Design) {
+  const order: Step[] = [], seen = new Set<string>();
+  const byId = new Map(d.steps.map(s => [s.id, s]));
+  const visit = (s: Step) => {
+    if (seen.has(s.id)) return; seen.add(s.id); order.push(s);
+    for (const f of d.flows) if (f.from === s.id && byId.has(f.to)) visit(byId.get(f.to)!);
+  };
+  for (const s of d.steps) if (!d.flows.some(f => f.to === s.id && byId.has(f.from))) visit(s);
+  for (const s of d.steps) visit(s);
+  const idx = new Map(order.map((s, i) => [s.id, i]));
+  const pitch = STEP_W + STEP_GAP, laneEnd = new Map<number, number>(), x = new Map<string, number>();
+  for (const s of order) {
+    const lane = Math.max(0, d.lanes.indexOf(s.lane ?? ''));
+    const preds = d.flows.filter(f => f.to === s.id && idx.has(f.from) && idx.get(f.from)! < idx.get(s.id)!).map(f => x.get(f.from)! + pitch);
+    const sx = Math.max(160, laneEnd.get(lane) ?? 0, ...preds);
+    x.set(s.id, sx); laneEnd.set(lane, sx + pitch);
+    s.x = sx; s.y = processTop(d) + lane * LANE_H + 30;
+  }
 }
 
 function placeStep(d: Design, s: Step, after?: string) {
@@ -255,10 +395,17 @@ function placeStep(d: Design, s: Step, after?: string) {
   const x = prev?.x !== undefined ? prev.x + STEP_W + STEP_GAP : Math.max(-1, ...d.steps.filter(x => x !== s && x.x !== undefined).map(x => x.x!)) + STEP_W + STEP_GAP;
   s.x = Math.max(160, x); s.y = processTop(d) + lane * LANE_H + 30;
 }
+/** Under the other stickies, in the shorter of their two columns. */
 function placeAssumption(d: Design, a: Assumption) {
-  const tablesRight = Math.max(0, ...d.tables.map(t => (t.x ?? 0) + TABLE_W));
-  const i = d.assumptions.indexOf(a);
-  a.x = tablesRight + 200 + (i % 2) * 250; a.y = Math.floor(i / 2) * 150;
+  const placed = d.assumptions.filter(x => x !== a && x.x !== undefined);
+  if (!placed.length) {
+    const right = Math.max(0, ...d.tables.filter(t => t.x !== undefined).map(t => t.x! + tableWidth(t)), ...d.machines.filter(m => m.x !== undefined).map(m => m.x! + machineSize(m).w));
+    a.x = right + 120; a.y = 0; return;
+  }
+  const x0 = Math.min(...placed.map(p => p.x!)), y0 = Math.min(...placed.map(p => p.y!));
+  const bottom = (x: number) => Math.max(y0, ...placed.filter(p => Math.abs(p.x! - x) < STICKY_W / 2).map(p => p.y! + stickyHeight(p) + 24));
+  const [x, y] = [x0, x0 + STICKY_W + 30].map(cx => [cx, bottom(cx)]).sort((p, q) => p[1] - q[1])[0];
+  a.x = x; a.y = y;
 }
 
 /** Applies one operation in place. Throws OpError when it does not fit the current design. */
@@ -428,7 +575,7 @@ export function applyOp(d: Design, op: Op, author = 'you') {
       const m = d.machines.find(x => x.table === t.name && x.column === op.column);
       if (m) { m.states = states; m.transitions = transitions; }
       else {
-        const right = Math.max(0, ...d.tables.map(x => (x.x ?? 0) + TABLE_W), ...d.assumptions.map(a => (a.x ?? 0) + 230));
+        const right = Math.max(0, ...d.tables.map(x => (x.x ?? 0) + tableWidth(x)), ...d.assumptions.map(a => (a.x ?? 0) + STICKY_W));
         const below = Math.max(0, ...d.machines.filter(x => (x.x ?? 0) >= right).map(x => x.y! + machineSize(x).h + 40));
         d.machines.push({ table: t.name, column: op.column, states, transitions, x: right + 120, y: below });
       }
@@ -462,6 +609,7 @@ export function applyOp(d: Design, op: Op, author = 'you') {
       target.x = x; target.y = y;
       return;
     }
+    case 'arrange': arrange(d); return;
     default: throw new OpError(`unknown op ${(op as { op: string }).op}`);
   }
 }
@@ -487,7 +635,7 @@ export function applyOps(d: Design, ops: Op[], author = 'you'): Design {
 }
 
 /** Whether an op only rearranges the canvas: those never turn an approved version into a draft. */
-export const layoutOnly = (ops: Op[]) => ops.every(o => o.op === 'move');
+export const layoutOnly = (ops: Op[]) => ops.every(o => o.op === 'move' || o.op === 'arrange');
 
 /* ---------- what a batch of operations changes: drives the proposal preview ---------- */
 export interface DesignDiff {

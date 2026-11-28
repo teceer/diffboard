@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyOps, diffDesigns, emptyDesign, OpError, type Design, type Op } from './model';
+import { applyOps, diffDesigns, emptyDesign, layoutOnly, machineSize, OpError, stickyHeight, tableHeight, tableWidth, type Design, type Op } from './model';
 import { check } from './rules';
 import { exportDesign } from './export';
 import { DesignStore } from './store';
@@ -323,4 +323,94 @@ test('tables below the old process top stay where they are: the lanes go under a
   ]);
   expect(d.tables[0].y).toBe(1500);
   expect(d.processY!).toBeGreaterThanOrEqual(1500 + 34 + 22 + 8 + 80);
+});
+
+/* ---------- arranging the board ---------- */
+type B = { k: string; x: number; y: number; w: number; h: number };
+const boxes = (d: Design): B[] => [
+  ...d.tables.map(t => ({ k: `table:${t.name}`, x: t.x!, y: t.y!, w: tableWidth(t), h: tableHeight(t) })),
+  ...d.machines.map(m => ({ k: `machine:${m.table}`, x: m.x!, y: m.y!, ...machineSize(m) })),
+  ...d.assumptions.map(a => ({ k: `assumption:${a.id}`, x: a.x!, y: a.y!, w: 220, h: stickyHeight(a) })),
+];
+const overlaps = (d: Design) => {
+  const b = boxes(d), out: string[] = [];
+  for (let i = 0; i < b.length; i++) for (let j = i + 1; j < b.length; j++)
+    if (b[i].x < b[j].x + b[j].w && b[j].x < b[i].x + b[i].w && b[i].y < b[j].y + b[j].h && b[j].y < b[i].y + b[i].h) out.push(`${b[i].k} × ${b[j].k}`);
+  return out;
+};
+const cols = (n: number) => [{ name: 'id', type: 'uuid', pk: true }, ...Array.from({ length: n }, (_, i) => ({ name: `c${i}`, type: 'text' }))];
+/** Like the core12 board: one module with a dozen tables, states, long notes, a process. */
+function bigBoard() {
+  const ops: Op[] = [{ op: 'add-module', name: 'identity', kind: 'platform' }, { op: 'add-table', table: 'tenant', module: 'system', columns: cols(5) }];
+  for (let i = 0; i < 12; i++) ops.push({ op: 'add-table', table: `t${i}`, module: 'identity', columns: [...cols(4 + (i % 5) * 2), { name: 'tenant_id', type: 'uuid', ref: { table: 'tenant', column: 'id' } }], x: 400, y: i * 200 });
+  ops.push({ op: 'set-samples', table: 't0', rows: [{ id: 'u-1' }, { id: 'u-2' }, { id: 'u-3' }] });
+  for (let i = 0; i < 9; i++) ops.push({ op: 'add-assumption', text: 'x'.repeat(40 + i * 60), x: 860 + (i % 2) * 250, y: Math.floor(i / 2) * 150 });
+  ops.push({ op: 'set-machine', table: 't3', column: 'c0', states: ['a', 'b', 'c', 'd'] });
+  ops.push({ op: 'add-step', id: 'S1', title: 'one', lane: 'L1', touches: [] }, { op: 'add-step', id: 'S2', title: 'two', lane: 'L2', touches: [], after: 'S1' },
+    { op: 'add-step', id: 'S3', title: 'three', lane: 'L1', touches: [], x: 160, y: 1000 }, { op: 'add-flow', from: 'S2', to: 'S3' }, { op: 'add-flow', from: 'S3', to: 'S1' });
+  return applyOps(emptyDesign('b', 'b'), ops);
+}
+
+describe('the board keeps itself readable', () => {
+  test('nothing overlaps after any batch, even with notes laid on a fixed grid', () => {
+    expect(overlaps(bigBoard())).toEqual([]);
+  });
+
+  test('sample rows widen a table and push its neighbour right instead of covering it', () => {
+    let d = applyOps(emptyDesign('s', 's'), [
+      { op: 'add-table', table: 'a', columns: cols(2), x: 0, y: 0 },
+      { op: 'add-table', table: 'b', columns: cols(2), x: 320, y: 0 },
+    ]);
+    d = applyOps(d, [{ op: 'set-samples', table: 'a', rows: [{ id: '1' }, { id: '2' }] }]);
+    expect(tableWidth(d.tables[0])).toBe(260 + 2 * 112);
+    expect(d.tables[1].x!).toBeGreaterThanOrEqual(260 + 2 * 112);
+    expect(overlaps(d)).toEqual([]);
+  });
+
+  test('arrange: modules in balanced columns, states and notes beside them, the process underneath', () => {
+    const d = applyOps(bigBoard(), [{ op: 'arrange' }]);
+    expect(overlaps(d)).toEqual([]);
+    const ident = d.tables.filter(t => t.module === 'identity');
+    const xs = [...new Set(ident.map(t => t.x!))];
+    expect(xs.length).toBeGreaterThan(1);
+    for (const x of xs) {
+      const col = ident.filter(t => t.x === x);
+      expect(Math.max(...col.map(t => t.y! + tableHeight(t)))).toBeLessThanOrEqual(1100);
+    }
+    // modules do not share columns
+    const sys = d.tables.find(t => t.name === 'tenant')!;
+    const identL = Math.min(...ident.map(t => t.x!)), identR = Math.max(...ident.map(t => t.x! + tableWidth(t)));
+    expect(sys.x! >= identR + 100 || sys.x! + tableWidth(sys) + 100 <= identL).toBe(true);
+    const dataRight = Math.max(...d.tables.map(t => t.x! + tableWidth(t)));
+    for (const m of d.machines) expect(m.x!).toBeGreaterThan(dataRight);
+    for (const a of d.assumptions) expect(a.x!).toBeGreaterThan(Math.max(...d.machines.map(m => m.x! + machineSize(m).w)));
+    const bottom = Math.max(...boxes(d).map(b => b.y + b.h));
+    expect(d.processY!).toBeGreaterThanOrEqual(bottom + 80);
+    for (const s of d.steps) expect(s.y!).toBeGreaterThan(d.processY!);
+    // steps follow the flow and never cover each other
+    for (const f of d.flows) if (f.to !== 'S1') expect(d.steps.find(s => s.id === f.to)!.x!).toBeGreaterThan(d.steps.find(s => s.id === f.from)!.x!); // S3 → S1 loops back
+    for (const a of d.steps) for (const b of d.steps) if (a !== b && a.y === b.y) expect(Math.abs(a.x! - b.x!)).toBeGreaterThanOrEqual(180);
+    // the process comes up when the data model got shorter
+    expect(d.processY!).toBeLessThan(bigBoard().processY!);
+  });
+
+  test('arrange only moves things: it never turns an approved version into a draft', () => {
+    expect(layoutOnly([{ op: 'arrange' }])).toBe(true);
+    const before = bigBoard(), after = applyOps(before, [{ op: 'arrange' }]);
+    const strip = (d: Design) => JSON.stringify({ ...d, rev: 0, processY: 0, tables: d.tables.map(({ x, y, ...t }) => t), steps: d.steps.map(({ x, y, ...s }) => s), machines: d.machines.map(({ x, y, ...m }) => m), assumptions: d.assumptions.map(({ x, y, ...a }) => a) });
+    expect(strip(after)).toBe(strip(before));
+  });
+
+  test('a referenced table comes before the tables that point at it', () => {
+    const d = applyOps(emptyDesign('o', 'o'), [
+      { op: 'add-table', table: 'child', module: 'm', columns: [{ name: 'id', type: 'uuid', pk: true }, { name: 'p', type: 'uuid', ref: { table: 'parent', column: 'id' } }] },
+      { op: 'add-table', table: 'lonely', module: 'm', columns: cols(1) },
+      { op: 'add-table', table: 'parent', module: 'm', columns: cols(1) },
+      { op: 'arrange' },
+    ]);
+    const at = (n: string) => d.tables.find(t => t.name === n)!;
+    const order = [...d.tables].sort((a, b) => a.x! - b.x! || a.y! - b.y!).map(t => t.name);
+    expect(order).toEqual(['parent', 'child', 'lonely']);
+    expect(at('parent').x).toBe(at('child').x);
+  });
 });

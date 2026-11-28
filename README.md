@@ -78,8 +78,13 @@ rests on. Open it at `http://localhost:4700/design`.
   (`history.jsonl`) and approved versions (`v1.json`, …) next to it: it travels with the branch and
   the pull request, and a checkout reloads it.
 - **Operations, not drawing.** Agents change the design with operations (`add-table`,
-  `set-column`, `add-step`, …) over the CLI; the canvas lays them out. Every change has an author
-  and can be undone; a batch applies all or nothing.
+  `set-column`, `add-step`, …) over the CLI; the canvas lays them out and never lets two things
+  cover each other. Every change has an author and can be undone; a batch applies all or nothing.
+- **Arrange.** One click (⊟ or `L`, `diffboard design arrange`) lays the board out again: each
+  module a frame of balanced columns with referenced tables first, state machines and assumptions
+  beside them, the process in flow order underneath. Only positions change.
+- **Sample data on the canvas.** A table shows its first two sample rows next to the column types,
+  so you read the model on real values, not only on field names.
 - **Proposals.** A refactor arrives as a proposal you see as a diff on the canvas (added, removed,
   changed) and accept or reject; the agent can block on your decision.
 - **Rules on the schema.** Missing or mistyped references, a foreign key from one business module
